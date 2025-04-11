@@ -41,6 +41,7 @@ public class FullscreenActivity extends AppCompatActivity {
      */
     private static final int AUTO_HIDE_DELAY_MILLIS = 3000;
 
+    static final int DEVICE_ADMIN_ADD_REQUEST = 1001;
     /**
      * Some older devices needs a small delay between UI widget updates
      * and a change of the status and navigation bar.
@@ -91,6 +92,7 @@ public class FullscreenActivity extends AppCompatActivity {
                 if (AUTO_HIDE) {
                     delayedHide(AUTO_HIDE_DELAY_MILLIS);
                 }
+                mPinning = lockTask(false);
                 break;
             case MotionEvent.ACTION_UP:
                 view.performClick();
@@ -102,51 +104,47 @@ public class FullscreenActivity extends AppCompatActivity {
     };
     private ActivityFullscreenBinding binding;
 
-    private static SharedPreferences pref;
     private static boolean mPinning = false;
     private static final String PREFERENCE_NAME = "kiosk_pinning";
     private static final String PIN_PREF = "pin_state";
     private DevicePolicyManager manager;
+    private ComponentName mAdminComponentName;
 
-    private void enablePinning(boolean enabled) {
+    private boolean lockTask(boolean start) {
         try {
-            if (enabled) {
+            if (start) {
                 startLockTask();
-//                if (manager.isLockTaskPermitted(this.getPackageName())) {
-//                    startLockTask();
-//                } else {
-//                    Toast.makeText(this, getString(R.string.kiosk_not_permitted), Toast.LENGTH_SHORT).show();
-//                }
+                return true;
             } else {
                 stopLockTask();
+                return false;
             }
         } catch (Exception e) {
             // TODO: Log and handle appropriately
         }
+        return false;
     }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        ComponentName deviceAdmin = new ComponentName(this, AdminReceiver.class);
+        boolean enableLockTask = false;
+        mAdminComponentName = new ComponentName(this, AdminReceiver.class);
         manager = (DevicePolicyManager)getSystemService(Context.DEVICE_POLICY_SERVICE);
-        if (!manager.isAdminActive(deviceAdmin)) {
+        if (!manager.isAdminActive(mAdminComponentName)) {
             Toast.makeText(this, getString(R.string.not_device_admin), Toast.LENGTH_SHORT).show();
-        }
+            enableLockTask = true;
+        } else
+            enableLockTask = false;
 
         if (manager.isDeviceOwnerApp(getPackageName())) {
-            manager.setLockTaskPackages(deviceAdmin, new String[]{getPackageName()});
+            manager.setLockTaskPackages(mAdminComponentName, new String[]{getPackageName()});
+            enableLockTask = true;
         } else {
             Toast.makeText(this, getString(R.string.not_device_owner), Toast.LENGTH_SHORT).show();
+            enableLockTask = false;
         }
-
-        if (pref == null)
-            pref = FullscreenActivity.this.getSharedPreferences(PREFERENCE_NAME,Context.MODE_PRIVATE);
-
-        mPinning = pref.getBoolean(PIN_PREF, true);
-        enablePinning(mPinning);
-        mPinning = !mPinning;
 
         binding = ActivityFullscreenBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -165,6 +163,23 @@ public class FullscreenActivity extends AppCompatActivity {
         // operations to prevent the jarring behavior of controls going away
         // while interacting with the UI.
         binding.dummyButton.setOnTouchListener(mDelayHideTouchListener);
+
+        if (enableLockTask)
+            enableAdmin();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        mPinning = lockTask(false);
+    }
+
+
+    private void enableAdmin() {
+        Intent intent = new Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN);
+        intent.putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, mAdminComponentName);
+        // Start the add device admin activity
+        startActivityForResult(intent, DEVICE_ADMIN_ADD_REQUEST);
     }
 
     @Override
@@ -175,6 +190,7 @@ public class FullscreenActivity extends AppCompatActivity {
         // created, to briefly hint to the user that UI controls
         // are available.
         delayedHide(100);
+        mPinning = lockTask(true);
     }
 
     private void toggle() {
@@ -223,10 +239,6 @@ public class FullscreenActivity extends AppCompatActivity {
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.action_menu, menu);
 
-        menu.findItem(R.id.action_pinning)
-                .setTitle(mPinning
-                        ?R.string.pinning
-                        :R.string.unpinning);
         return true;
     }
 
@@ -239,18 +251,6 @@ public class FullscreenActivity extends AppCompatActivity {
             case R.id.action_bt: {
                 startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
                 return true;
-            }
-            case R.id.action_pinning: {
-                enablePinning(mPinning);
-                if (mPinning) {
-                    item.setTitle(R.string.pinning);
-                } else {
-                    item.setTitle(R.string.unpinning);
-                }
-                Editor edit = pref.edit();
-                edit.putBoolean(PIN_PREF, mPinning);
-                edit.commit();
-                mPinning = !mPinning;
             }
             default:
                 return super.onOptionsItemSelected(item);
