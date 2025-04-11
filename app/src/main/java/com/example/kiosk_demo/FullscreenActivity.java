@@ -5,6 +5,11 @@ import android.annotation.SuppressLint;
 import androidx.appcompat.app.ActionBar;
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.app.admin.DevicePolicyManager;
+import android.content.ComponentName;
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.content.SharedPreferences.Editor;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,6 +20,7 @@ import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
 import android.webkit.WebView;
+import android.widget.Toast;
 
 import com.example.kiosk_demo.databinding.ActivityFullscreenBinding;
 
@@ -96,9 +102,51 @@ public class FullscreenActivity extends AppCompatActivity {
     };
     private ActivityFullscreenBinding binding;
 
+    private static SharedPreferences pref;
+    private static boolean mPinning = false;
+    private static final String PREFERENCE_NAME = "kiosk_pinning";
+    private static final String PIN_PREF = "pin_state";
+    private DevicePolicyManager manager;
+
+    private void enablePinning(boolean enabled) {
+        try {
+            if (enabled) {
+                startLockTask();
+//                if (manager.isLockTaskPermitted(this.getPackageName())) {
+//                    startLockTask();
+//                } else {
+//                    Toast.makeText(this, getString(R.string.kiosk_not_permitted), Toast.LENGTH_SHORT).show();
+//                }
+            } else {
+                stopLockTask();
+            }
+        } catch (Exception e) {
+            // TODO: Log and handle appropriately
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        ComponentName deviceAdmin = new ComponentName(this, AdminReceiver.class);
+        manager = (DevicePolicyManager)getSystemService(Context.DEVICE_POLICY_SERVICE);
+        if (!manager.isAdminActive(deviceAdmin)) {
+            Toast.makeText(this, getString(R.string.not_device_admin), Toast.LENGTH_SHORT).show();
+        }
+
+        if (manager.isDeviceOwnerApp(getPackageName())) {
+            manager.setLockTaskPackages(deviceAdmin, new String[]{getPackageName()});
+        } else {
+            Toast.makeText(this, getString(R.string.not_device_owner), Toast.LENGTH_SHORT).show();
+        }
+
+        if (pref == null)
+            pref = FullscreenActivity.this.getSharedPreferences(PREFERENCE_NAME,Context.MODE_PRIVATE);
+
+        mPinning = pref.getBoolean(PIN_PREF, true);
+        enablePinning(mPinning);
+        mPinning = !mPinning;
 
         binding = ActivityFullscreenBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
@@ -174,6 +222,11 @@ public class FullscreenActivity extends AppCompatActivity {
     public boolean onCreateOptionsMenu(Menu menu) {
         MenuInflater inflater = getMenuInflater();
         inflater.inflate(R.menu.action_menu, menu);
+
+        menu.findItem(R.id.action_pinning)
+                .setTitle(mPinning
+                        ?R.string.pinning
+                        :R.string.unpinning);
         return true;
     }
 
@@ -186,6 +239,18 @@ public class FullscreenActivity extends AppCompatActivity {
             case R.id.action_bt: {
                 startActivity(new Intent(Settings.ACTION_BLUETOOTH_SETTINGS));
                 return true;
+            }
+            case R.id.action_pinning: {
+                enablePinning(mPinning);
+                if (mPinning) {
+                    item.setTitle(R.string.pinning);
+                } else {
+                    item.setTitle(R.string.unpinning);
+                }
+                Editor edit = pref.edit();
+                edit.putBoolean(PIN_PREF, mPinning);
+                edit.commit();
+                mPinning = !mPinning;
             }
             default:
                 return super.onOptionsItemSelected(item);
